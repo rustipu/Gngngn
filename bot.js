@@ -1,49 +1,56 @@
-const { Client, GatewayIntentBits, SlashCommandBuilder } = require('discord.js');
-const fs = require('fs');
-require('dotenv').config();
+const { Client, GatewayIntentBits, SlashCommandBuilder } = require("discord.js");
+const fs = require("fs");
+const dotenv = require("dotenv");
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-const cooldowns = new Map(); // Track user cooldowns
+dotenv.config();
 
-// Load accounts from a file
-function getRandomAccount() {
-    const accounts = fs.readFileSync("accounts.txt", "utf8").split("\n").filter(line => line.trim() !== "");
-    if (accounts.length === 0) return null;
-    return accounts[Math.floor(Math.random() * accounts.length)];
-}
-
-client.on("ready", async () => {
-    console.log(`Logged in as ${client.user.tag}`);
-
-    // Register slash command globally
-    const commands = [
-        new SlashCommandBuilder()
-            .setName('generate')
-            .setDescription('Get a randomly generated account')
-    ];
-
-    await client.application.commands.set(commands);
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
 });
 
-client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isCommand() || interaction.commandName !== "generate") return;
+const cooldowns = new Map();
+const COOLDOWN_TIME = 60 * 60 * 1000; // 1 hour in milliseconds
 
+client.once("ready", () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
+});
+
+// Register /generate command
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isCommand()) return;
+
+  if (interaction.commandName === "generate") {
     const userId = interaction.user.id;
     const now = Date.now();
-    const cooldown = cooldowns.get(userId);
 
-    if (cooldown && now - cooldown < 3600000) { // 1-hour cooldown
-        const remainingTime = Math.ceil((3600000 - (now - cooldown)) / 60000);
-        return interaction.reply({ content: `⏳ You need to wait **${remainingTime} minutes** before generating again!`, ephemeral: true });
+    if (cooldowns.has(userId)) {
+      const expirationTime = cooldowns.get(userId) + COOLDOWN_TIME;
+      if (now < expirationTime) {
+        const timeLeft = Math.ceil((expirationTime - now) / 60000);
+        return interaction.reply({
+          content: `⏳ You need to wait **${timeLeft} minutes** before using /generate again.`,
+          ephemeral: true,
+        });
+      }
     }
 
-    const account = getRandomAccount();
-    if (!account) {
-        return interaction.reply({ content: "⚠️ No accounts available! Please wait for a restock.", ephemeral: true });
+    // Read accounts file
+    let accounts = fs.readFileSync("accounts.txt", "utf8").split("\n").filter(line => line.trim() !== "");
+    
+    if (accounts.length === 0) {
+      return interaction.reply({ content: "❌ No accounts available!", ephemeral: true });
     }
 
+    // Select a random account
+    const randomIndex = Math.floor(Math.random() * accounts.length);
+    const selectedAccount = accounts[randomIndex];
+
+    // Reply with the account (only user can see it)
+    await interaction.reply({ content: `🎁 Here is your account:\n\`${selectedAccount}\``, ephemeral: true });
+
+    // Update cooldown
     cooldowns.set(userId, now);
-    await interaction.reply({ content: `🎉 Here is your account: \`${account}\``, ephemeral: true });
+  }
 });
 
 client.login(process.env.TOKEN);
